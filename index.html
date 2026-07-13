@@ -214,6 +214,7 @@ details.dir>summary:hover{background:rgba(255,255,255,.04)}
       <input type="text" id="outName" value="archive" aria-label="Output file name">
       <span class="suffix">.gw1</span>
       <button class="primary" id="makeBtn" disabled>Create .gw1</button>
+      <button id="copyBtn" disabled>Copy text</button>
     </div>
 
     <div class="status" id="packStatus"></div>
@@ -393,7 +394,7 @@ window.addEventListener('drop', function(e){ e.preventDefault(); });
 var staged=[], pathSet={};
 var nameTouched=false;
 var packDrop=$('#packDrop'), packTree=$('#packTree'), packStatus=$('#packStatus');
-var makeBtn=$('#makeBtn'), clearBtn=$('#clearBtn'), outName=$('#outName');
+var makeBtn=$('#makeBtn'), clearBtn=$('#clearBtn'), copyBtn=$('#copyBtn'), outName=$('#outName');
 
 outName.addEventListener('input', function(){ nameTouched=true; });
 
@@ -475,6 +476,7 @@ async function walkEntry(entry, prefix){
 function renderPack(){
   var has = staged.length>0;
   makeBtn.disabled = !has;
+  copyBtn.disabled = !has;
   clearBtn.disabled = !has;
   $('#packMeta').hidden = !has;
   if(!has){ packTree.innerHTML=''; return; }
@@ -492,7 +494,7 @@ function renderPack(){
 async function handlePackDrop(e){
   e.preventDefault();
   packDrop.classList.remove('drag');
-  var busy=[makeBtn,clearBtn]; busy.forEach(function(b){ b.disabled=true; });
+  var busy=[makeBtn,clearBtn,copyBtn]; busy.forEach(function(b){ b.disabled=true; });
   setStatus(packStatus, 'Reading...');
   try{
     var entries=[], loose=[];
@@ -558,14 +560,13 @@ clearBtn.addEventListener('click', function(){
   setStatus(packStatus,'Cleared');
 });
 
-makeBtn.addEventListener('click', function(){
-  if(!staged.length) return;
+function buildManifest(){
   var folders={};
   staged.forEach(function(f){
     var i=f.path.lastIndexOf('/');
     if(i>0){ var d=f.path.slice(0,i); folders[d]=(folders[d]||0)+1; }
   });
-  var manifest={
+  return {
     format:'GW1', version:1,
     created:new Date().toISOString(),
     generator:'GW1 Packer',
@@ -576,10 +577,46 @@ makeBtn.addEventListener('click', function(){
       return { path:f.path, name:f.name, ext:f.ext, mime:f.mime, bytes:f.bytes, uri:f.uri };
     })
   };
+}
+
+makeBtn.addEventListener('click', function(){
+  if(!staged.length) return;
   var name=(outName.value.trim()||'archive').replace(/\.gw1$/i,'');
-  var blob=new Blob([JSON.stringify(manifest,null,2)],{type:'application/json'});
+  var blob=new Blob([JSON.stringify(buildManifest(),null,2)],{type:'application/json'});
   download(blob, name+'.gw1');
   setStatus(packStatus,'Saved '+name+'.gw1 ('+fmtBytes(blob.size)+')','ok');
+});
+
+async function copyText(text){
+  try{
+    await navigator.clipboard.writeText(text);
+    return true;
+  }catch(e1){
+    try{
+      var ta=document.createElement('textarea');
+      ta.value=text;
+      ta.setAttribute('readonly','');
+      ta.style.position='fixed';
+      ta.style.left='-9999px';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      ta.setSelectionRange(0, ta.value.length);
+      var ok=document.execCommand('copy');
+      ta.remove();
+      return ok;
+    }catch(e2){ return false; }
+  }
+}
+
+copyBtn.addEventListener('click', async function(){
+  if(!staged.length) return;
+  setStatus(packStatus,'Copying...');
+  var text=JSON.stringify(buildManifest(),null,2);
+  var ok=await copyText(text);
+  setStatus(packStatus, ok
+    ? 'Copied '+fmtBytes(text.length)+' to clipboard. Paste it into a text editor and save it with a .gw1 extension.'
+    : 'Copy was blocked by the browser. Use Create .gw1 to download instead.', ok?'ok':'err');
 });
 
 /* =================================================
